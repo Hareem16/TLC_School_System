@@ -1,0 +1,36 @@
+TLC SCHOOL SYSTEM — CURRENT INSTALLATION GUIDE
+
+WINDOWS
+- Supported desktop target: 64-bit Windows 10 and Windows 11.
+- Windows XP is not supported by the Flutter desktop runtime.
+- Extract the complete Windows x64 ZIP to a normal writable folder. Keep all
+  files together and run tlc_school_system.exe from the extracted folder.
+- Flutter does not need to be installed on the target PC.
+- If a required MSVC runtime DLL is missing, install the official x64 Microsoft
+  Visual C++ Redistributable: https://aka.ms/vc14/vc_redist.x64.exe
+- If the app opens to a blank window, the cause is not confirmed by the
+  installed runtime alone. Record the time of the failure and check Windows
+  Event Viewer > Windows Logs > Application for an error mentioning
+  tlc_school_system.exe or flutter_windows.dll.
+
+ANDROID
+- Install the supplied APK and approve installation from that source if
+  Android prompts. Install updates over the existing app; do not uninstall
+  first if local records must be kept.
+
+IPHONE
+- There is no iPhone installation package in the current release.
+- The requested private installable web app is not ready yet. It needs the
+  shared online database and an HTTPS web host before it can be added from
+  Safari to the iPhone Home Screen.
+
+IMPORTANT — CURRENT BUILDS DO NOT SHARE DATA
+- The current Windows and Android releases store data separately on each
+  device. They do not share student, parent, fee, or staff records.
+- Do not treat records entered on different devices as one synchronized
+  school database. A shared Supabase-backed release is a separate upgrade.
+- Preserve the existing school Windows PC database and make a backup before
+  any migration or app replacement. That PC was identified as the intended
+  source of the first shared-data migration.
+- Parents currently use the features available in their own local copy; they
+  do not see live changes made on a school's separate device.
