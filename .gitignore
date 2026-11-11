@@ -1,0 +1,98 @@
+﻿# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history/
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IDE
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# Flutter / Dart
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+**/.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+.packages
+/build/
+/coverage/
+
+# Flutter generated files
+app.*.symbols
+app.*.map.json
+.widget_preview/
+
+# Android generated build folders
+/android/app/debug/
+/android/app/profile/
+/android/app/release/
+
+# Local databases and database journals
+*.db
+*.sqlite
+*.sqlite3
+*.db3
+*.db-wal
+*.db-shm
+*.sqlite-wal
+*.sqlite-shm
+
+# Database exports and backups
+*.bak
+*.backup
+*.dump
+*.db-backup
+*.sqlite-backup
+
+# Signing keys and certificates
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+key.properties
+android/key.properties
+
+# Environment files and local credentials
+.env
+.env.*
+!.env.example
+credentials.*
+secrets.*
+*service-account*.json
+
+# Local backups and safety copies
+*Safety_Backups*/
+*.safety-copy-*
+
+# Distribution packages and generated releases
+/dist/
+/release/
+/releases/
+*.apk
+*.aab
+*.msi
+*.zip
+
+# Temporary previews
+/reference_preview_tmp.mp4
+*.tmp
+*.temp
+# Local-only source backups (preserve on this computer)
+/lib/main_backup.dart
+/fonts

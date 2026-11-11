@@ -1,0 +1,74 @@
+﻿TLC SCHOOL SYSTEM
+INSTALLATION AND UPDATE GUIDE
+
+1. WINDOWS INSTALLATION
+
+Supported:
+- Windows 10, 64-bit
+- Windows 11, 64-bit
+
+Installation:
+1. Extract the complete Windows x64 distribution ZIP into a normal writable folder.
+2. Keep all extracted application files together.
+3. Run tlc_school_system.exe.
+4. Flutter does not need to be installed on the target computer.
+
+If a required MSVC runtime DLL is missing, install the official x64 Microsoft Visual C++ Redistributable:
+https://aka.ms/vc14/vc_redist.x64.exe
+
+If the application opens to a blank window, check:
+Windows Event Viewer > Windows Logs > Application
+
+Look for an error mentioning tlc_school_system.exe or flutter_windows.dll.
+
+2. ANDROID INSTALLATION
+
+1. Install the supplied TLC School System APK.
+2. Approve installation from the selected source if Android requests permission.
+3. For an update, install the new APK over the existing application.
+4. Do not uninstall the existing application if its local records must be preserved.
+5. Do not clear the application's storage or data.
+
+Android updates must use the same package ID and compatible signing certificate as the installed application.
+
+3. IMPORTANT DATA SAFETY
+
+The current Windows and Android releases maintain separate local databases.
+
+Records entered on one device do not automatically synchronize with another device.
+
+Supabase configuration is present in the project, but a complete shared school-data synchronization system is not yet implemented.
+
+Before any database migration, application replacement or major update:
+- Create a database backup.
+- Verify the backup.
+- Preserve the original database.
+- Do not delete existing school records.
+
+4. CENTRALIZED UPDATES
+
+The planned centralized TLC Update System will use:
+
+- GitHub Releases for Windows and Android packages.
+- The TLC school website for public update information and downloads.
+- A central manifest for version information and package checksums.
+
+Windows updates will use a controlled installation process.
+
+Android updates will require approval through the Android package installer.
+
+Until the updater is completed and tested, use the verified installation instructions supplied with each release.
+
+5. IPHONE
+
+There is currently no installable iPhone release.
+
+A private installable web application requires a suitable HTTPS host and a completed shared-data architecture.
+
+6. SCHOOL DATA
+
+School data is important.
+
+Never uninstall the application, clear application storage, delete SQLite database files or replace a database manually as an update procedure.
+
+Always preserve a verified backup before performing maintenance.
