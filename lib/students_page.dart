@@ -710,16 +710,21 @@ class _StudentsPageState extends State<StudentsPage> {
                 'STUDENT RECORDS',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
+                  fontSize: 22,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF252B36),
                 ),
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 6),
               const Text(
                 'Search, add, and manage student master records.',
-                style: TextStyle(color: Colors.blueGrey),
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Color(0xFF727B89),
+                ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
               Wrap(
                 spacing: 10,
                 runSpacing: 8,
