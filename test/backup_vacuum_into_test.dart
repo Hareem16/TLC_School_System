@@ -6,68 +6,70 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('VACUUM INTO creates a valid database backup', () async {
+  test('VACUUM INTO creates a valid independent database backup', () async {
     sqfliteFfiInit();
 
-    const sourcePath =
-        r'D:\TLC_School_Backups\SQLite\TLC_Windows_DB_20261109.db';
-
-    final source = File(sourcePath);
-    expect(await source.exists(), isTrue,
-        reason: 'Verified source backup must exist.');
-
-    final timestamp = DateTime.now().microsecondsSinceEpoch;
-    final target = File(
-      '${Directory.systemTemp.path}${Platform.pathSeparator}'
-      'tlc_vacuum_test_$timestamp.db',
-    );
-
     final factory = databaseFactoryFfi;
+    final tempDirectory =
+        await Directory.systemTemp.createTemp('tlc_vacuum_test_');
+
+    final sourcePath =
+        '${tempDirectory.path}${Platform.pathSeparator}source.db';
+    final targetPath =
+        '${tempDirectory.path}${Platform.pathSeparator}backup.db';
+
     Database? sourceDb;
     Database? backupDb;
 
     try {
       sourceDb = await factory.openDatabase(
         sourcePath,
-        options: OpenDatabaseOptions(readOnly: true),
+        options: OpenDatabaseOptions(
+          version: 1,
+          onCreate: (db, version) async {
+            await db.execute(
+              'CREATE TABLE test_records ('
+              'id INTEGER PRIMARY KEY, '
+              'record_name TEXT NOT NULL'
+              ')',
+            );
+            await db.insert('test_records', {
+              'record_name': 'TLC backup verification',
+            });
+          },
+        ),
       );
 
-      await sourceDb.execute(
-        'VACUUM INTO ?',
-        [target.path],
-      );
+      await sourceDb.execute('VACUUM INTO ?', [targetPath]);
 
+      final target = File(targetPath);
       expect(await target.exists(), isTrue);
       expect(await target.length(), greaterThan(0));
 
       backupDb = await factory.openDatabase(
-        target.path,
+        targetPath,
         options: OpenDatabaseOptions(readOnly: true),
       );
 
-      final integrity = await backupDb.rawQuery(
-        'PRAGMA integrity_check',
-      );
-
+      final integrity = await backupDb.rawQuery('PRAGMA integrity_check');
       expect(integrity.first.values.first, 'ok');
 
-      final tables = await backupDb.rawQuery(
-        "SELECT name FROM sqlite_master "
-        "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+      final records = await backupDb.query('test_records');
+      expect(records.length, 1);
+      expect(
+        records.first['record_name'],
+        'TLC backup verification',
       );
-
-      expect(tables.length, 23);
 
       print('VACUUM INTO: SUCCESS');
       print('Backup size: ${await target.length()} bytes');
       print('Integrity: ${integrity.first.values.first}');
-      print('Application tables: ${tables.length}');
     } finally {
       await backupDb?.close();
       await sourceDb?.close();
 
-      if (await target.exists()) {
-        await target.delete();
+      if (await tempDirectory.exists()) {
+        await tempDirectory.delete(recursive: true);
       }
     }
   });

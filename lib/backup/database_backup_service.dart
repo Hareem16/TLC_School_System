@@ -9,7 +9,7 @@ import 'package:sqflite/sqflite.dart';
 import '../data/app_database.dart';
 
 class DatabaseBackupService {
-  static const int requiredDatabaseVersion = 14;
+  static const int requiredDatabaseVersion = AppDatabase.schemaVersion;
 
   static const List<String> requiredTables = [
     'school_profiles',
@@ -20,13 +20,18 @@ class DatabaseBackupService {
     'user_accounts',
     'fee_charges',
     'fee_payments',
+    'fee_payment_allocations',
     'inventory_items',
     'inventory_movements',
     'staff_salary_records',
+    'school_account_settings',
     'fee_payment_reversals',
     'exams',
     'exam_subjects',
     'exam_results',
+    'exam_subject_teachers',
+    'exam_class_teachers',
+    'exam_publications',
     'timetable_entries',
     'complaints',
     'class_subjects',
@@ -230,7 +235,7 @@ class DatabaseBackupService {
     if (databaseVersion != requiredDatabaseVersion) {
       throw StateError(
         'Database version mismatch. '
-        'Expected 14 but found $databaseVersion. '
+        'Expected $requiredDatabaseVersion but found $databaseVersion. '
         'Backup cancelled.',
       );
     }

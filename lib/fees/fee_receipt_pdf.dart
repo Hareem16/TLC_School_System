@@ -1,5 +1,3 @@
-
-
 import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -79,12 +77,22 @@ class FeeReceiptPdf {
               _detailRow('Student', payment.studentName),
               _detailRow('G.R. No.', payment.admissionNumber),
               _detailRow('Class', payment.className),
-              _detailRow('Fee month', _monthLabel(payment.monthKey)),
+              _detailRow('Voucher month', _monthLabel(payment.monthKey)),
               pw.Divider(color: accent),
-              _detailRow('Monthly fee', _money(payment.amountDue)),
-              _detailRow('Paid on this receipt', _money(payment.amountPaidThisReceipt)),
-              _detailRow('Total paid for this month', _money(payment.totalPaid)),
-              _detailRow('Remaining balance', _money(payment.balance)),
+              _detailRow(
+                'Outstanding before receipt',
+                _money(payment.amountDue),
+              ),
+              _detailRow(
+                'Paid on this receipt',
+                _money(payment.amountPaidThisReceipt),
+              ),
+              for (final allocation in payment.allocations)
+                _detailRow(
+                  'Applied to ${_monthLabel(allocation.monthKey)}',
+                  _money(allocation.amount),
+                ),
+              _detailRow('Outstanding after receipt', _money(payment.balance)),
               _detailRow('Payment method', payment.paymentMethod),
               if (payment.receivedByName.trim().isNotEmpty)
                 _detailRow(
@@ -133,7 +141,9 @@ class FeeReceiptPdf {
             style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9),
           ),
         ),
-        pw.Expanded(child: pw.Text(value, style: const pw.TextStyle(fontSize: 9))),
+        pw.Expanded(
+          child: pw.Text(value, style: const pw.TextStyle(fontSize: 9)),
+        ),
       ],
     ),
   );

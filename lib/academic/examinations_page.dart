@@ -24,11 +24,15 @@ class _ExaminationsPageState extends State<ExaminationsPage> {
   List<Map<String, Object?>> _exams = [];
   List<(String, String)> _classSections = [];
   final Map<String, List<Map<String, Object?>>> _subjects = {};
+  Map<String, String> _subjectTeachers = {};
+  Map<String, String> _classTeachers = {};
+  Map<String, String> _teacherNames = {};
+  Set<String> _publishedExamIds = {};
   bool _loading = true;
   String? _error;
 
   bool get _canManage => AppRoles.fullAccessRoles.contains(widget.user.role);
-  bool get _canSetUpExams => _canManage || widget.user.role == AppRoles.teacher;
+  bool get _canSetUpExams => _canManage;
   Set<String> get _classScope => widget.user.assignedClassSections.toSet();
   String _classSectionKey(String className, String sectionName) =>
       '${className.trim()}\u001f${sectionName.trim()}';
@@ -39,6 +43,8 @@ class _ExaminationsPageState extends State<ExaminationsPage> {
       (exam['section_name'] as String?) ?? '',
     ),
   );
+  bool _isPublished(Map<String, Object?> exam) =>
+      _publishedExamIds.contains(exam['exam_id']);
 
   @override
   void initState() {
@@ -51,6 +57,33 @@ class _ExaminationsPageState extends State<ExaminationsPage> {
       final db = await AppDatabase.instance.database;
       final exams = await db.query('exams', orderBy: 'start_date DESC');
       final filtered = _canManage ? exams : exams.where(_examInScope).toList();
+      final subjectAssignments = await db.query('exam_subject_teachers');
+      final classAssignments = await db.query('exam_class_teachers');
+      final teacherRows = await db.query(
+        'user_accounts',
+        columns: ['account_id', 'full_name'],
+        where: 'role = ?',
+        whereArgs: [AppRoles.teacher],
+      );
+      final publications = await db.query(
+        'exam_publications',
+        columns: ['exam_id'],
+      );
+      final subjectTeachers = {
+        for (final row in subjectAssignments)
+          row['subject_id'] as String: row['teacher_user_id'] as String,
+      };
+      final classTeachers = {
+        for (final row in classAssignments)
+          row['exam_id'] as String: row['teacher_user_id'] as String,
+      };
+      final teacherNames = {
+        for (final row in teacherRows)
+          row['account_id'] as String: row['full_name'] as String,
+      };
+      final publishedExamIds = publications
+          .map((row) => row['exam_id'] as String)
+          .toSet();
       final studentRows = await db.query(
         'students',
         columns: ['class_name', 'section_name'],
@@ -73,12 +106,21 @@ class _ExaminationsPageState extends State<ExaminationsPage> {
       final subjects = <String, List<Map<String, Object?>>>{};
       for (final exam in filtered) {
         final id = exam['exam_id'] as String;
-        subjects[id] = await db.query(
+        final examSubjects = await db.query(
           'exam_subjects',
           where: 'exam_id = ?',
           whereArgs: [id],
           orderBy: 'subject_name COLLATE NOCASE',
         );
+        subjects[id] = _canManage
+            ? examSubjects
+            : examSubjects
+                  .where(
+                    (subject) =>
+                        subjectTeachers[subject['subject_id']] ==
+                        widget.user.id,
+                  )
+                  .toList(growable: false);
       }
       if (!mounted) return;
       setState(() {
@@ -87,6 +129,10 @@ class _ExaminationsPageState extends State<ExaminationsPage> {
         _subjects
           ..clear()
           ..addAll(subjects);
+        _subjectTeachers = subjectTeachers;
+        _classTeachers = classTeachers;
+        _teacherNames = teacherNames;
+        _publishedExamIds = publishedExamIds;
         _error = null;
         _loading = false;
       });
@@ -219,6 +265,10 @@ class _ExaminationsPageState extends State<ExaminationsPage> {
   }
 
   Future<void> _changeExamClass(Map<String, Object?> exam) async {
+    if (_isPublished(exam)) {
+      _toast('Published examinations are locked.');
+      return;
+    }
     if (_classSections.isEmpty) return;
     final db = await AppDatabase.instance.database;
     final existingMarks = await db.rawQuery(
@@ -294,6 +344,10 @@ class _ExaminationsPageState extends State<ExaminationsPage> {
   }
 
   Future<void> _addSubject(Map<String, Object?> exam) async {
+    if (_isPublished(exam)) {
+      _toast('Published examinations are locked.');
+      return;
+    }
     final name = TextEditingController();
     final total = TextEditingController(text: '100');
     final examId = exam['exam_id'] as String;
@@ -366,6 +420,18 @@ class _ExaminationsPageState extends State<ExaminationsPage> {
   }
 
   Future<void> _editTotal(Map<String, Object?> subject) async {
+    final published = await (await AppDatabase.instance.database).query(
+      'exam_publications',
+      columns: ['exam_id'],
+      where: 'exam_id = ?',
+      whereArgs: [subject['exam_id']],
+      limit: 1,
+    );
+    if (!mounted) return;
+    if (published.isNotEmpty) {
+      _toast('Published examinations are locked.');
+      return;
+    }
     final controller = TextEditingController(text: '${subject['total_marks']}');
     final saved = await showDialog<bool>(
       context: context,
@@ -418,6 +484,18 @@ class _ExaminationsPageState extends State<ExaminationsPage> {
     Map<String, Object?> exam,
     Map<String, Object?> subject,
   ) async {
+    final subjectId = subject['subject_id'] as String;
+    final examId = exam['exam_id'] as String;
+    if (_publishedExamIds.contains(examId)) {
+      _toast(
+        'Published marks are locked. Contact the Principal for corrections.',
+      );
+      return;
+    }
+    if (!_canManage && _subjectTeachers[subjectId] != widget.user.id) {
+      _toast('You can enter marks only for your assigned subjects.');
+      return;
+    }
     final db = await AppDatabase.instance.database;
     final students = await db.query(
       'students',
@@ -584,6 +662,28 @@ class _ExaminationsPageState extends State<ExaminationsPage> {
     );
     if (commit == true) {
       await db.transaction((txn) async {
+        final publication = await txn.query(
+          'exam_publications',
+          columns: ['exam_id'],
+          where: 'exam_id = ?',
+          whereArgs: [examId],
+          limit: 1,
+        );
+        if (publication.isNotEmpty) {
+          throw StateError('Published marks are locked.');
+        }
+        if (!_canManage) {
+          final assignment = await txn.query(
+            'exam_subject_teachers',
+            columns: ['subject_id'],
+            where: 'subject_id = ? AND teacher_user_id = ?',
+            whereArgs: [subjectId, widget.user.id],
+            limit: 1,
+          );
+          if (assignment.isEmpty) {
+            throw StateError('You are not assigned to this subject.');
+          }
+        }
         for (final student in students) {
           final studentId = student['student_id'] as String;
           final mark = double.parse(controllers[studentId]!.text.trim());
@@ -597,7 +697,9 @@ class _ExaminationsPageState extends State<ExaminationsPage> {
         }
       });
       _toast('Marks saved.');
+      await _load();
     }
+
     for (final controller in controllers.values) {
       controller.dispose();
     }
@@ -607,6 +709,169 @@ class _ExaminationsPageState extends State<ExaminationsPage> {
     for (final focusNode in focusNodes.values) {
       focusNode.dispose();
     }
+  }
+
+  Future<List<AppUser>> _teachersForExam(Map<String, Object?> exam) async {
+    final db = await AppDatabase.instance.database;
+    final accounts = await db.query(
+      'user_accounts',
+      where: 'role = ? AND is_active = 1',
+      whereArgs: [AppRoles.teacher],
+      orderBy: 'full_name COLLATE NOCASE',
+    );
+    final classKey = _classSectionKey(
+      exam['class_name'] as String,
+      (exam['section_name'] as String?) ?? '',
+    );
+    return accounts
+        .map(AppUser.fromDatabaseMap)
+        .where((teacher) => teacher.assignedClassSections.contains(classKey))
+        .toList(growable: false);
+  }
+
+  Future<void> _assignSubjectTeacher(
+    Map<String, Object?> exam,
+    Map<String, Object?> subject,
+  ) async {
+    if (_isPublished(exam)) {
+      _toast('Published examinations are locked.');
+      return;
+    }
+    final teachers = await _teachersForExam(exam);
+    if (!mounted) return;
+    final subjectId = subject['subject_id'] as String;
+    var selected = _subjectTeachers[subjectId] ?? '';
+    if (!teachers.any((teacher) => teacher.id == selected)) selected = '';
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Assign ${subject['subject_name']} teacher'),
+        content: DropdownButtonFormField<String>(
+          initialValue: selected,
+          decoration: const InputDecoration(labelText: 'Subject teacher'),
+          items: [
+            const DropdownMenuItem(value: '', child: Text('Unassigned')),
+            for (final teacher in teachers)
+              DropdownMenuItem(
+                value: teacher.id,
+                child: Text(teacher.fullName),
+              ),
+          ],
+          onChanged: (value) => selected = value ?? '',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (saved != true) return;
+    final db = await AppDatabase.instance.database;
+    await db.transaction((txn) async {
+      if (selected.isEmpty) {
+        await txn.delete(
+          'exam_subject_teachers',
+          where: 'subject_id = ?',
+          whereArgs: [subjectId],
+        );
+      } else {
+        await txn.insert('exam_subject_teachers', {
+          'subject_id': subjectId,
+          'teacher_user_id': selected,
+          'assigned_by_user_id': widget.user.id,
+          'assigned_at': DateTime.now().toIso8601String(),
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+      await txn.insert('admin_audit_logs', {
+        'log_id': newRecordId(),
+        'actor_user_id': widget.user.id,
+        'actor_name': widget.user.fullName,
+        'action': 'exam_subject_teacher_assigned',
+        'target': '${exam['exam_name']} · ${subject['subject_name']}',
+        'details': selected.isEmpty
+            ? 'Subject teacher assignment removed.'
+            : 'Assigned to ${_teacherNames[selected] ?? selected}.',
+        'created_at': DateTime.now().toIso8601String(),
+      });
+    });
+    await _load();
+  }
+
+  Future<void> _assignClassTeacher(Map<String, Object?> exam) async {
+    if (_isPublished(exam)) {
+      _toast('Published examinations are locked.');
+      return;
+    }
+    final teachers = await _teachersForExam(exam);
+    if (!mounted) return;
+    final examId = exam['exam_id'] as String;
+    var selected = _classTeachers[examId] ?? '';
+    if (!teachers.any((teacher) => teacher.id == selected)) selected = '';
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Assign class teacher'),
+        content: DropdownButtonFormField<String>(
+          initialValue: selected,
+          decoration: const InputDecoration(labelText: 'Class teacher'),
+          items: [
+            const DropdownMenuItem(value: '', child: Text('Unassigned')),
+            for (final teacher in teachers)
+              DropdownMenuItem(
+                value: teacher.id,
+                child: Text(teacher.fullName),
+              ),
+          ],
+          onChanged: (value) => selected = value ?? '',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (saved != true) return;
+    final db = await AppDatabase.instance.database;
+    await db.transaction((txn) async {
+      if (selected.isEmpty) {
+        await txn.delete(
+          'exam_class_teachers',
+          where: 'exam_id = ?',
+          whereArgs: [examId],
+        );
+      } else {
+        await txn.insert('exam_class_teachers', {
+          'exam_id': examId,
+          'teacher_user_id': selected,
+          'assigned_by_user_id': widget.user.id,
+          'assigned_at': DateTime.now().toIso8601String(),
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+      await txn.insert('admin_audit_logs', {
+        'log_id': newRecordId(),
+        'actor_user_id': widget.user.id,
+        'actor_name': widget.user.fullName,
+        'action': 'exam_class_teacher_assigned',
+        'target': '${exam['exam_name']} · ${exam['class_name']}',
+        'details': selected.isEmpty
+            ? 'Class teacher assignment removed.'
+            : 'Assigned to ${_teacherNames[selected] ?? selected}.',
+        'created_at': DateTime.now().toIso8601String(),
+      });
+    });
+    await _load();
   }
 
   String _performanceRemark(double marks, double total) {
@@ -925,25 +1190,52 @@ class _ExaminationsPageState extends State<ExaminationsPage> {
                             label: const Text('Change class / section'),
                           ),
                         ),
+                      if (_canManage && !_isPublished(exam))
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton.icon(
+                            onPressed: () => _assignClassTeacher(exam),
+                            icon: const Icon(Icons.person_outline),
+                            label: Text(
+                              'Class teacher: '
+                              '${_teacherNames[_classTeachers[exam['exam_id']]] ?? 'Not assigned'}',
+                            ),
+                          ),
+                        ),
                       for (final subject
                           in _subjects[exam['exam_id']] ?? const [])
                         ListTile(
                           title: Text('${subject['subject_name']}'),
                           subtitle: Text(
-                            'Total: ${_mark((subject['total_marks'] as num).toDouble())} marks',
+                            'Total: ${_mark((subject['total_marks'] as num).toDouble())} marks'
+                            '${_canManage ? '  •  Teacher: ${_teacherNames[_subjectTeachers[subject['subject_id']]] ?? 'Not assigned'}' : ''}',
                           ),
                           trailing: Wrap(
                             spacing: 2,
                             children: [
-                              if (_canSetUpExams)
+                              if (_canManage && !_isPublished(exam))
+                                IconButton(
+                                  tooltip: 'Assign subject teacher',
+                                  onPressed: () =>
+                                      _assignSubjectTeacher(exam, subject),
+                                  icon: const Icon(Icons.person_add_alt_1),
+                                ),
+                              if (_canSetUpExams && !_isPublished(exam))
                                 IconButton(
                                   tooltip: 'Edit total marks',
                                   onPressed: () => _editTotal(subject),
                                   icon: const Icon(Icons.edit_outlined),
                                 ),
                               FilledButton.tonal(
-                                onPressed: () => _enterMarks(exam, subject),
-                                child: const Text('Enter marks'),
+                                onPressed:
+                                    _publishedExamIds.contains(exam['exam_id'])
+                                    ? null
+                                    : () => _enterMarks(exam, subject),
+                                child: Text(
+                                  _publishedExamIds.contains(exam['exam_id'])
+                                      ? 'Published'
+                                      : 'Enter marks',
+                                ),
                               ),
                             ],
                           ),
@@ -951,9 +1243,11 @@ class _ExaminationsPageState extends State<ExaminationsPage> {
                       if ((_subjects[exam['exam_id']] ?? const []).isEmpty)
                         const Padding(
                           padding: EdgeInsets.all(16),
-                          child: Text('Add subjects and marks to begin.'),
+                          child: Text(
+                            'No subjects are assigned to this teacher or added to this examination.',
+                          ),
                         ),
-                      if (_canSetUpExams)
+                      if (_canSetUpExams && !_isPublished(exam))
                         Padding(
                           padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
                           child: Align(

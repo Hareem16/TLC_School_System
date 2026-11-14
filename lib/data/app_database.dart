@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -5,7 +6,11 @@ import 'package:path/path.dart' as path;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 class AppDatabase {
+  static const int schemaVersion = 19;
+
   AppDatabase._();
+
+  AppDatabase.forTesting(Database database) : _database = database;
 
   static final AppDatabase instance = AppDatabase._();
   Database? _database;
@@ -26,7 +31,7 @@ class AppDatabase {
 
     _database = await openDatabase(
       path.join(databaseDirectory, 'tlc_school_system.db'),
-      version: 14,
+      version: schemaVersion,
       onCreate: (database, version) async {
         await database.execute('''
           CREATE TABLE school_profiles (
@@ -106,11 +111,14 @@ class AppDatabase {
           )
         ''');
         await _createOperationalTables(database);
+        await _createSchoolAccountSettingsTable(database);
         await _createScheduleTables(database);
+        await _createResultAccessTables(database);
         await _createComplaintsTable(database);
         await _createContentTables(database);
         await _createAuthSupportTables(database);
         await _createFeePaymentCorrectionTables(database);
+        await _createFeePaymentAllocationsTable(database);
       },
       onConfigure: (database) async {
         await database.execute('PRAGMA foreign_keys = ON');
@@ -286,6 +294,66 @@ class AppDatabase {
             "ALTER TABLE students ADD COLUMN roll_number TEXT NOT NULL DEFAULT ''",
           );
         }
+        if (oldVersion < 15) {
+          for (final column in [
+            'fees',
+            'annual',
+            'admission',
+            'lab',
+            'copies',
+            'stationery',
+            'extras',
+            'lpc',
+          ]) {
+            await database.execute(
+              'ALTER TABLE fee_charges ADD COLUMN $column REAL NOT NULL DEFAULT 0',
+            );
+          }
+          await database.execute(
+            "ALTER TABLE fee_charges ADD COLUMN remarks TEXT NOT NULL DEFAULT ''",
+          );
+          await database.execute(
+            'UPDATE fee_charges SET fees = amount_due WHERE fees = 0',
+          );
+        }
+        if (oldVersion < 16) {
+          await _createFeePaymentAllocationsTable(database);
+        }
+        if (oldVersion < 17) {
+          await _createResultAccessTables(database);
+        }
+        if (oldVersion < 18) {
+          final accounts = await database.query(
+            'user_accounts',
+            columns: ['account_id', 'role', 'permissions'],
+            where: 'role IN (?, ?)',
+            whereArgs: ['Parent / Guardian', 'Student'],
+          );
+          for (final account in accounts) {
+            final permissions = jsonDecode(account['permissions']! as String);
+            if (permissions is! List ||
+                permissions.any((permission) => permission is! String)) {
+              throw const FormatException(
+                'Invalid account permissions during results access migration.',
+              );
+            }
+            if (permissions.contains('Results & Report Cards')) continue;
+            await database.update(
+              'user_accounts',
+              {
+                'permissions': jsonEncode([
+                  ...permissions.cast<String>(),
+                  'Results & Report Cards',
+                ]),
+              },
+              where: 'account_id = ?',
+              whereArgs: [account['account_id']],
+            );
+          }
+        }
+        if (oldVersion < 19) {
+          await _createSchoolAccountSettingsTable(database);
+        }
       },
     );
     return _database!;
@@ -309,6 +377,15 @@ class AppDatabase {
         student_id TEXT NOT NULL,
         month_key TEXT NOT NULL,
         amount_due REAL NOT NULL CHECK (amount_due >= 0),
+        fees REAL NOT NULL DEFAULT 0 CHECK (fees >= 0),
+        annual REAL NOT NULL DEFAULT 0 CHECK (annual >= 0),
+        admission REAL NOT NULL DEFAULT 0 CHECK (admission >= 0),
+        lab REAL NOT NULL DEFAULT 0 CHECK (lab >= 0),
+        copies REAL NOT NULL DEFAULT 0 CHECK (copies >= 0),
+        stationery REAL NOT NULL DEFAULT 0 CHECK (stationery >= 0),
+        extras REAL NOT NULL DEFAULT 0 CHECK (extras >= 0),
+        lpc REAL NOT NULL DEFAULT 0 CHECK (lpc >= 0),
+        remarks TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL,
         UNIQUE(student_id, month_key),
         FOREIGN KEY(student_id) REFERENCES students(student_id) ON DELETE CASCADE
@@ -376,6 +453,48 @@ class AppDatabase {
     ''');
     await database.execute('''
       CREATE INDEX staff_salary_month_index ON staff_salary_records(month_key)
+    ''');
+  }
+
+  static Future<void> _createSchoolAccountSettingsTable(
+    DatabaseExecutor database,
+  ) async {
+    await database.execute('''
+      CREATE TABLE school_account_settings (
+        setting_id INTEGER PRIMARY KEY CHECK (setting_id = 1),
+        opening_balance REAL NOT NULL DEFAULT 0 CHECK (opening_balance >= 0),
+        opening_balance_date TEXT NOT NULL
+      )
+    ''');
+    await database.insert('school_account_settings', {
+      'setting_id': 1,
+      'opening_balance': 0,
+      'opening_balance_date': DateTime.now().toIso8601String().substring(0, 10),
+    });
+  }
+
+  static Future<void> _createFeePaymentAllocationsTable(
+    DatabaseExecutor database,
+  ) async {
+    await database.execute('''
+      CREATE TABLE IF NOT EXISTS fee_payment_allocations (
+        allocation_id TEXT PRIMARY KEY,
+        payment_id TEXT NOT NULL,
+        fee_id TEXT NOT NULL,
+        amount REAL NOT NULL CHECK (amount > 0),
+        UNIQUE(payment_id, fee_id),
+        FOREIGN KEY(payment_id) REFERENCES fee_payments(payment_id),
+        FOREIGN KEY(fee_id) REFERENCES fee_charges(fee_id)
+      )
+    ''');
+    await database.execute('''
+      CREATE INDEX IF NOT EXISTS fee_payment_allocations_fee_index
+      ON fee_payment_allocations(fee_id)
+    ''');
+    await database.execute('''
+      INSERT OR IGNORE INTO fee_payment_allocations
+        (allocation_id, payment_id, fee_id, amount)
+      SELECT payment_id, payment_id, fee_id, amount FROM fee_payments
     ''');
   }
 
@@ -488,6 +607,82 @@ class AppDatabase {
         room TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL
       )
+    ''');
+  }
+
+  static Future<void> _createResultAccessTables(
+    DatabaseExecutor database,
+  ) async {
+    await database.execute('''
+      CREATE TABLE IF NOT EXISTS exam_subject_teachers (
+        subject_id TEXT PRIMARY KEY,
+        teacher_user_id TEXT NOT NULL,
+        assigned_by_user_id TEXT NOT NULL,
+        assigned_at TEXT NOT NULL,
+        FOREIGN KEY(subject_id) REFERENCES exam_subjects(subject_id) ON DELETE CASCADE,
+        FOREIGN KEY(teacher_user_id) REFERENCES user_accounts(account_id),
+        FOREIGN KEY(assigned_by_user_id) REFERENCES user_accounts(account_id)
+      )
+    ''');
+    await database.execute('''
+      CREATE TABLE IF NOT EXISTS exam_class_teachers (
+        exam_id TEXT PRIMARY KEY,
+        teacher_user_id TEXT NOT NULL,
+        assigned_by_user_id TEXT NOT NULL,
+        assigned_at TEXT NOT NULL,
+        FOREIGN KEY(exam_id) REFERENCES exams(exam_id) ON DELETE CASCADE,
+        FOREIGN KEY(teacher_user_id) REFERENCES user_accounts(account_id),
+        FOREIGN KEY(assigned_by_user_id) REFERENCES user_accounts(account_id)
+      )
+    ''');
+    await database.execute('''
+      CREATE TABLE IF NOT EXISTS exam_publications (
+        exam_id TEXT PRIMARY KEY,
+        published_by_user_id TEXT NOT NULL,
+        published_by_name TEXT NOT NULL,
+        published_at TEXT NOT NULL,
+        FOREIGN KEY(exam_id) REFERENCES exams(exam_id) ON DELETE CASCADE,
+        FOREIGN KEY(published_by_user_id) REFERENCES user_accounts(account_id)
+      )
+    ''');
+    await database.execute('''
+      CREATE INDEX IF NOT EXISTS exam_subject_teacher_user_index
+      ON exam_subject_teachers(teacher_user_id)
+    ''');
+    await database.execute('''
+      CREATE TRIGGER IF NOT EXISTS exam_results_block_published_insert
+      BEFORE INSERT ON exam_results
+      WHEN EXISTS (
+        SELECT 1 FROM exam_subjects s
+        JOIN exam_publications p ON p.exam_id = s.exam_id
+        WHERE s.subject_id = NEW.subject_id
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'Published examination results are locked.');
+      END
+    ''');
+    await database.execute('''
+      CREATE TRIGGER IF NOT EXISTS exam_results_block_published_update
+      BEFORE UPDATE ON exam_results
+      WHEN EXISTS (
+        SELECT 1 FROM exam_subjects s
+        JOIN exam_publications p ON p.exam_id = s.exam_id
+        WHERE s.subject_id IN (OLD.subject_id, NEW.subject_id)
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'Published examination results are locked.');
+      END
+    ''');
+    await database.execute('''
+      CREATE TRIGGER IF NOT EXISTS exam_subjects_block_published_update
+      BEFORE UPDATE ON exam_subjects
+      WHEN EXISTS (
+        SELECT 1 FROM exam_publications p
+        WHERE p.exam_id = OLD.exam_id
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'Published examination structure is locked.');
+      END
     ''');
   }
 
