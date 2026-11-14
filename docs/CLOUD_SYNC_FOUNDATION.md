@@ -12,7 +12,7 @@ The live Supabase project has an additive cloud-sync foundation:
 - A private `tlc-school-backups` Storage bucket exists. Backup files must be encrypted on the client before upload.
 - Anonymous execution was revoked from the existing school helper functions.
 - Sync RPCs require an authenticated user, active school membership, and an approved device.
-- Sync payloads are limited to 1 MiB and recursively reject credential/token field names, including nested password hashes and refresh tokens.
+- Sync payloads are limited to 1 MiB and recursively reject credential/token field names, including nested password hashes, access/refresh tokens, JWTs, secrets, and credential objects.
 - The F.D.O. role is limited to fee and inventory sync; financial reversals are Admin-only.
 
 ## Current live status
@@ -42,7 +42,7 @@ The current ZIP uses local SQLite schema version 18; GitHub `main` was found at 
 
 ## Deployment notes
 
-The migrations in this directory reproduce the migrations applied to the live Supabase project on 2026-11-14. The live project also has a fourth helper-permissions migration that keeps the recursive payload-check helpers callable only by the database function owner. If a fresh Supabase project is used, apply them in timestamp order after the existing school, membership, and device foundation migrations. Do not re-run them blindly against a database that already has these versions.
+The migrations in this directory reproduce the migrations applied to the live Supabase project on 2026-11-14. The live project also has a helper-permissions and token-field hardening migrations that keeps the recursive payload-check helpers callable only by the database function owner. If a fresh Supabase project is used, apply them in timestamp order after the existing school, membership, and device foundation migrations. Do not re-run them blindly against a database that already has these versions.
 
 ## Next client-side steps
 
