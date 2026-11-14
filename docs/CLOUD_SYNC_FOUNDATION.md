@@ -25,7 +25,7 @@ The live Supabase project has an additive cloud-sync foundation:
 
 ## Important implementation boundary
 
-This is the **server foundation**, not yet an activated end-to-end app sync. The Flutter client still needs its local SQLite outbox, change-capture triggers, safe pull-apply logic, conflict UI, cloud account linking, and membership/device approval screens.
+This is the **server foundation plus cloud-account linking UI**, not yet an activated end-to-end data sync. The Flutter client now has a Cloud Account & Sync page. It signs in with the same school email using a separate Supabase password, verifies the pre-assigned school membership and matching role, and registers the device. Local sign-in remains independent. The Flutter client still needs its local SQLite outbox, change-capture triggers, safe pull-apply logic, conflict UI, initial baseline upload, and backup/restore UI.
 
 The current ZIP uses local SQLite schema version 18; GitHub `main` was found at version 14. Do not replace version 18 files with the older branch. Reconcile the current source snapshot before integrating client code.
 
@@ -48,8 +48,9 @@ The migrations in this directory reproduce the migrations applied to the live Su
 
 1. Reconcile GitHub main with the current version 18 source.
 2. Add SQLite outbox/state/conflict tables and change-capture triggers.
-3. Add cloud email identity linking without replacing local offline login.
-4. Add membership and device approval workflows for newly linked accounts/devices.
-5. Implement bounded push/pull, conflict handling, and initial baseline upload.
-6. Add encrypted cloud backup upload/restore and test recovery.
-7. Run Windows and Android offline/multi-device tests before enabling automatic sync.
+3. Provision each cloud Auth user and approved school membership from the Admin-controlled workflow; do not let a user self-assign a role.
+4. Approve newly registered devices in the Admin workflow.
+5. Add SQLite outbox/state/conflict tables and safe change-capture triggers.
+6. Implement bounded push/pull, conflict handling, and an Admin-confirmed initial baseline upload.
+7. Add encrypted cloud backup upload/restore and test recovery.
+8. Run Windows and Android offline/multi-device tests before enabling automatic sync.
