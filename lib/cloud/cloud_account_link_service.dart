@@ -78,7 +78,7 @@ class CloudAccountLinkService {
       await client.auth.signOut();
       throw StateError(
         'The cloud role "$cloudRole" does not match the local role '
-        '"\${localUser.role}". Ask the Admin to correct the membership.',
+        '"${localUser.role}". Ask the Admin to correct the membership.',
       );
     }
 
