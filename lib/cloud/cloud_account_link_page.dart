@@ -101,7 +101,7 @@ class _CloudAccountLinkPageState extends State<CloudAccountLinkPage> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Local account: \${widget.localUser.fullName} (\${widget.localUser.role})',
+                    'Local account: ${widget.localUser.fullName} (${widget.localUser.role})',
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 4),
@@ -119,7 +119,7 @@ class _CloudAccountLinkPageState extends State<CloudAccountLinkPage> {
                   else if (connected) ...[
                     _InfoLine(
                       icon: Icons.cloud_done,
-                      text: 'Connected cloud identity: \${CloudAccountLinkService.connectedEmail ?? ''}',
+                      text: 'Connected cloud identity: ${CloudAccountLinkService.connectedEmail ?? ''}',
                     ),
                     const SizedBox(height: 16),
                     OutlinedButton.icon(
