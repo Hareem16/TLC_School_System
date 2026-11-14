@@ -1,3 +1,4 @@
+import 'cloud/cloud_account_link_page.dart';
 import 'cloud/supabase_service.dart';
 import 'cloud/cloud_connection_check.dart';
 
@@ -185,6 +186,7 @@ class _TLCHomeState extends State<TLCHome> {
         ('Users & Roles', Icons.manage_accounts_rounded),
         ('Siblings & Families', Icons.family_restroom_rounded),
         ('Backup & Restore', Icons.backup_rounded),
+        ('Cloud Account & Sync', Icons.cloud_sync_rounded),
       ],
     ),
   ];
@@ -199,6 +201,7 @@ class _TLCHomeState extends State<TLCHome> {
   ];
 
   bool _canOpen(String module) {
+    if (module == 'Cloud Account & Sync') return true;
     if (module == 'Backup & Restore' &&
         !AppRoles.fullAccessRoles.contains(widget.user.role)) {
       return false;
@@ -583,6 +586,12 @@ class _TLCHomeState extends State<TLCHome> {
   }
 
   Widget _selectedContent(SchoolProfile p) {
+    if (selected == 'Cloud Account & Sync') {
+      return CloudAccountLinkPage(
+        localUser: widget.user,
+        primaryColor: p.primaryColor,
+      );
+    }
     if (selected == 'School Profile & Settings') {
       return SchoolSettingsPage(
         profile: p,

@@ -348,9 +348,6 @@ class _FeeVouchersPageState extends State<FeeVouchersPage> {
                 const Text(
                   'FEES & VOUCHERS',
                   textAlign: TextAlign.center,
-                  maxLines: 1,
-                  softWrap: false,
-                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.w700,
@@ -366,7 +363,7 @@ class _FeeVouchersPageState extends State<FeeVouchersPage> {
                     color: Color(0xFF727B89),
                   ),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
                 Wrap(
                   spacing: 10,
                   runSpacing: 8,
