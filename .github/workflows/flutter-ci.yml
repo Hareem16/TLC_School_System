@@ -1,5 +1,9 @@
 name: TLC Flutter CI
 
+concurrency:
+  group: tlc-flutter-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [main, cloud-sync-foundation]
