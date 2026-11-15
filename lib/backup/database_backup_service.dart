@@ -387,7 +387,7 @@ class DatabaseBackupService {
       try {
         final safetyDatabase = await openDatabase(safetyPath, readOnly: true);
         try {
-          await validateBackupAgainstDatabase(safetyDatabase, stagedDatabase);
+          await _validateRestoreCandidate(safetyDatabase, stagedDatabase);
         } finally {
           await safetyDatabase.close();
         }
