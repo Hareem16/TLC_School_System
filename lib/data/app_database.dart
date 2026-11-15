@@ -5,8 +5,10 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as path;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import 'fee_payment_allocation_guards.dart';
+
 class AppDatabase {
-  static const int schemaVersion = 19;
+  static const int schemaVersion = 20;
 
   AppDatabase._();
 
@@ -119,6 +121,7 @@ class AppDatabase {
         await _createAuthSupportTables(database);
         await _createFeePaymentCorrectionTables(database);
         await _createFeePaymentAllocationsTable(database);
+        await createFeePaymentAllocationGuards(database);
       },
       onConfigure: (database) async {
         await database.execute('PRAGMA foreign_keys = ON');
@@ -353,6 +356,9 @@ class AppDatabase {
         }
         if (oldVersion < 19) {
           await _createSchoolAccountSettingsTable(database);
+        }
+        if (oldVersion < 20) {
+          await createFeePaymentAllocationGuards(database);
         }
       },
     );
