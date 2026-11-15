@@ -42,6 +42,10 @@ class DatabaseBackupService {
     'admin_audit_logs',
   ];
 
+  final Future<void> Function()? afterOriginalMovedForTesting;
+
+  DatabaseBackupService({this.afterOriginalMovedForTesting});
+
   bool _supportsVacuumInto(String version) {
     final parts = version.split('.').map(int.tryParse).toList();
 
@@ -290,6 +294,7 @@ class DatabaseBackupService {
       }
     }
   }
+
   Future<void> _validateRestoreCandidate(
     Database currentDatabase,
     Database candidate,
@@ -318,8 +323,11 @@ class DatabaseBackupService {
     final databasePath = p.join(databaseDirectory, 'tlc_school_system.db');
     final absoluteBackupPath = p.normalize(p.absolute(sourceFile.path));
     final absoluteDatabasePath = p.normalize(p.absolute(databasePath));
-    if (absoluteBackupPath.toLowerCase() == absoluteDatabasePath.toLowerCase()) {
-      throw StateError('Select a backup file, not the currently open database.');
+    if (absoluteBackupPath.toLowerCase() ==
+        absoluteDatabasePath.toLowerCase()) {
+      throw StateError(
+        'Select a backup file, not the currently open database.',
+      );
     }
 
     final currentDatabase = await AppDatabase.instance.database;
@@ -402,6 +410,11 @@ class DatabaseBackupService {
 
       await databaseFile.rename(rollbackPath);
       originalMoved = true;
+
+      // Test-only injection point: simulate failure after the
+      // original database has been safely moved to the rollback path.
+      await afterOriginalMovedForTesting?.call();
+
       await stagingFile.rename(databasePath);
       replacementInstalled = true;
 
@@ -432,5 +445,4 @@ class DatabaseBackupService {
       if (await stagingFile.exists()) await stagingFile.delete();
     }
   }
-
 }
