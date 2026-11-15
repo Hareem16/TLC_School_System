@@ -1,4 +1,5 @@
-﻿import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/material.dart';
 
 import 'database_backup_service.dart';
 
@@ -55,6 +56,78 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
         setState(() {
           _isBackingUp = false;
         });
+      }
+    }
+  }
+
+
+  Future<void> _restoreBackup() async {
+    if (_isBackingUp) return;
+
+    try {
+      final selection = await FilePicker.platform.pickFiles(
+        dialogTitle: 'Select TLC School System database backup',
+        type: FileType.custom,
+        allowedExtensions: ['db', 'sqlite', 'sqlite3'],
+        allowMultiple: false,
+        withData: false,
+      );
+      if (!mounted || selection == null || selection.files.isEmpty) return;
+
+      final backupPath = selection.files.single.path;
+      if (backupPath == null || backupPath.isEmpty) {
+        throw StateError('The selected file path could not be accessed.');
+      }
+
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Confirm database restore'),
+          content: const Text(
+            'Restoring replaces the current school database with the selected '
+            'backup. A separate safety backup of the current database will '
+            'be created first. Continue only if you are certain this is the '
+            'correct backup file.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.red.shade700,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Restore Database'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted || confirmed != true) return;
+
+      setState(() {
+        _isBackingUp = true;
+        _hasError = false;
+        _message = 'Validating backup and preparing a safety copy...';
+      });
+
+      final safetyPath = await _backupService.restoreBackup(backupPath);
+      if (!mounted) return;
+      setState(() {
+        _message = 'Database restored and verified successfully. '
+            'Your pre-restore safety copy is saved at:\n$safetyPath';
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _hasError = true;
+        _message = 'Restore could not be completed:\n$error';
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _isBackingUp = false);
       }
     }
   }
@@ -157,6 +230,15 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
                           ),
                         ),
                       ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        height: 48,
+                        child: OutlinedButton.icon(
+                          onPressed: _isBackingUp ? null : _restoreBackup,
+                          icon: const Icon(Icons.restore_rounded),
+                          label: const Text('Restore from Backup'),
+                        ),
+                      ),
                       const SizedBox(height: 18),
                       Container(
                         width: double.infinity,
@@ -226,8 +308,9 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
                         '• Save it to a safe location outside the app folder.\n'
                         '• Keep an additional copy on a separate drive.\n'
                         '• Creating a backup does not delete or replace records.\n'
-                        '• Restore will be added only after its safety checks '
-                        'are implemented and tested.',
+                        '• Restore accepts only a compatible, verified database backup.\n'
+                        '• A pre-restore safety copy is created before replacement.\n'
+                        '• If verification fails, the previous database is restored.'
                         style: TextStyle(
                           height: 1.8,
                           color: Colors.blueGrey,
