@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import '../lib/backup/database_backup_service.dart';
+
 void main() {
   final backupPath = Platform.environment['TLC_SAFETY_COPY_PATH'];
 
@@ -33,6 +35,9 @@ void main() {
           "AND name NOT LIKE 'sqlite_%' "
           'ORDER BY name',
         );
+        final tableNames = tables
+            .map((row) => row['name'].toString())
+            .toSet();
         print('APPLICATION TABLE COUNT: ${tables.length}');
 
         for (final table in tables) {
@@ -48,9 +53,21 @@ void main() {
         );
         print('FOREIGN KEY ERRORS: ${foreignKeyErrors.length}');
 
-        expect(version, 14);
+        final missingTables = DatabaseBackupService.requiredTables
+            .where((name) => !tableNames.contains(name))
+            .toList();
+
+        expect(
+          version,
+          DatabaseBackupService.requiredDatabaseVersion,
+          reason: 'Safety copy must use the current app database version.',
+        );
         expect(integrityResult.toLowerCase(), 'ok');
-        expect(tables.length, 23);
+        expect(
+          missingTables,
+          isEmpty,
+          reason: 'Safety copy is missing required tables: $missingTables',
+        );
         expect(foreignKeyErrors, isEmpty);
       } finally {
         await database.close();
