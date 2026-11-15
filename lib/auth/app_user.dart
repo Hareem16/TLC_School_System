@@ -136,8 +136,8 @@ class AppRoles {
       'Notices',
     ],
     frontDeskOfficer => ['Dashboard', 'Fees & Vouchers', 'Reports'],
-    parent => ['Dashboard', 'Complaints', 'Notices'],
-    student => ['Dashboard'],
+    parent => ['Dashboard', 'Results & Report Cards', 'Complaints', 'Notices'],
+    student => ['Dashboard', 'Results & Report Cards'],
     _ => ['Dashboard'],
   };
 }

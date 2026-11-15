@@ -28,6 +28,13 @@ A Flutter-based school management application for The Learning Circle Secondary 
 - `test/` â€” Automated tests
 - `tool/` â€” Development utilities
 
+## Fee reports and school accounts
+
+- Fee voucher Excel exports can be filtered by month, date, week, calendar year, or academic session. Sessions run April through March.
+- In **Payroll**, administrators and the principal can record a teacher's salary payment, including its method and deductions.
+- In **Payroll**, administrators and the principal can open **School Accounts** from the account icon to set an opening balance and review monthly fee receipts, reversals, salary payments, and calculated closing balances.
+- Salary payments are recorded for bookkeeping only; the app does not initiate bank transfers. Set the opening balance and effective date to match the school's books before relying on the calculated balance.
+
 ## Development checks
 
 ```powershell
@@ -73,6 +80,8 @@ The centralized updater is under development. Automatic updates are not yet avai
 Supabase is configured in the project. This does not mean local school records are already synchronized.
 
 Windows and Android currently maintain separate local databases. Records entered on one device do not automatically appear on another.
+
+Exam results can be published to linked parent/student accounts in the local database. Cross-device parent access is not available until Supabase Auth account linking, results synchronization, and production row-level security policies are implemented and deployed. Do not treat local publication as cloud publication.
 
 ## Repository safety
 

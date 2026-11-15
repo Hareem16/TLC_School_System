@@ -11,6 +11,17 @@ import 'fee_ledger_pdf.dart';
 import 'fee_receipt_pdf.dart';
 import 'fee_voucher_pdf.dart';
 
+enum _FeeExportPeriod { month, date, week, year, session }
+
+enum _FeeExportStatus { all, paid, unpaid, partialPaid, outstandingDues }
+
+class _FeeExportSelection {
+  final _FeeExportPeriod period;
+  final _FeeExportStatus status;
+
+  const _FeeExportSelection(this.period, this.status);
+}
+
 class FeeVouchersPage extends StatefulWidget {
   final AppUser user;
   final SchoolProfile profile;
@@ -116,28 +127,287 @@ class _FeeVouchersPageState extends State<FeeVouchersPage> {
     }
   }
 
-  Future<void> _exportCharges(List<FeeCharge> charges) async {
-    if (_exporting || charges.isEmpty) return;
-    setState(() => _exporting = true);
+  Future<_FeeExportSelection?> _selectExportOptions() async {
+    var period = _FeeExportPeriod.month;
+    var status = _FeeExportStatus.all;
+    return showDialog<_FeeExportSelection>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Export fees and vouchers'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DropdownButtonFormField<_FeeExportPeriod>(
+                initialValue: period,
+                decoration: const InputDecoration(labelText: 'Period'),
+                items: const [
+                  DropdownMenuItem(
+                    value: _FeeExportPeriod.month,
+                    child: Text('Month wise'),
+                  ),
+                  DropdownMenuItem(
+                    value: _FeeExportPeriod.date,
+                    child: Text('Date wise'),
+                  ),
+                  DropdownMenuItem(
+                    value: _FeeExportPeriod.week,
+                    child: Text('Week wise'),
+                  ),
+                  DropdownMenuItem(
+                    value: _FeeExportPeriod.year,
+                    child: Text('Year wise'),
+                  ),
+                  DropdownMenuItem(
+                    value: _FeeExportPeriod.session,
+                    child: Text('Session wise (April–March)'),
+                  ),
+                ],
+                onChanged: (value) {
+                  if (value != null) {
+                    setDialogState(() => period = value);
+                  }
+                },
+              ),
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(switch (period) {
+                  _FeeExportPeriod.month =>
+                    'Choose a fee month to include all charges for that month.',
+                  _FeeExportPeriod.date =>
+                    'Choose one date to include charges created on that date.',
+                  _FeeExportPeriod.week =>
+                    'Choose any day; the report will cover Monday through Sunday.',
+                  _FeeExportPeriod.year =>
+                    'Choose any date in the calendar year to include its fee months.',
+                  _FeeExportPeriod.session =>
+                    'Choose any date; the session runs from April through March.',
+                }, style: Theme.of(context).textTheme.bodySmall),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<_FeeExportStatus>(
+                initialValue: status,
+                decoration: const InputDecoration(labelText: 'Payment status'),
+                items: const [
+                  DropdownMenuItem(
+                    value: _FeeExportStatus.all,
+                    child: Text('All statuses'),
+                  ),
+                  DropdownMenuItem(
+                    value: _FeeExportStatus.paid,
+                    child: Text('Paid'),
+                  ),
+                  DropdownMenuItem(
+                    value: _FeeExportStatus.unpaid,
+                    child: Text('Unpaid'),
+                  ),
+                  DropdownMenuItem(
+                    value: _FeeExportStatus.partialPaid,
+                    child: Text('Partial paid'),
+                  ),
+                  DropdownMenuItem(
+                    value: _FeeExportStatus.outstandingDues,
+                    child: Text('Outstanding dues'),
+                  ),
+                ],
+                onChanged: (value) {
+                  if (value != null) {
+                    setDialogState(() => status = value);
+                  }
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () =>
+                  Navigator.pop(context, _FeeExportSelection(period, status)),
+              child: const Text('Continue'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _exportCharges() async {
+    if (_exporting) return;
+    final selection = await _selectExportOptions();
+    if (selection == null || !mounted) return;
+
+    DateTime? month;
+    DateTimeRange? range;
+    DateTime? monthRangeStart;
+    DateTime? monthRangeEnd;
+    String? sessionLabel;
+    if (selection.period == _FeeExportPeriod.month) {
+      final selectedDate = await showDatePicker(
+        context: context,
+        initialDate: _month,
+        firstDate: DateTime(2000),
+        lastDate: DateTime(2100),
+        helpText: 'Choose fee month',
+      );
+      if (selectedDate == null || !mounted) return;
+      month = DateTime(selectedDate.year, selectedDate.month);
+    } else if (selection.period == _FeeExportPeriod.year) {
+      final selectedDate = await showDatePicker(
+        context: context,
+        initialDate: _month,
+        firstDate: DateTime(2000),
+        lastDate: DateTime(2100),
+        helpText: 'Choose a date in the calendar year',
+      );
+      if (selectedDate == null || !mounted) return;
+      monthRangeStart = DateTime(selectedDate.year, 1);
+      monthRangeEnd = DateTime(selectedDate.year, 12);
+    } else if (selection.period == _FeeExportPeriod.session) {
+      final selectedDate = await showDatePicker(
+        context: context,
+        initialDate: _month,
+        firstDate: DateTime(2000),
+        lastDate: DateTime(2100),
+        helpText: 'Choose a date in the April–March session',
+      );
+      if (selectedDate == null || !mounted) return;
+      final startYear = selectedDate.month >= DateTime.april
+          ? selectedDate.year
+          : selectedDate.year - 1;
+      monthRangeStart = DateTime(startYear, DateTime.april);
+      monthRangeEnd = DateTime(startYear + 1, DateTime.march);
+      sessionLabel = '$startYear-${startYear + 1}';
+    } else if (selection.period == _FeeExportPeriod.date) {
+      final selectedDate = await showDatePicker(
+        context: context,
+        initialDate: _month,
+        firstDate: DateTime(2000),
+        lastDate: DateTime(2100),
+        helpText: 'Choose fee charge date',
+      );
+      if (selectedDate == null || !mounted) return;
+      range = DateTimeRange(start: selectedDate, end: selectedDate);
+    } else {
+      final selectedDate = await showDatePicker(
+        context: context,
+        initialDate: _month,
+        firstDate: DateTime(2000),
+        lastDate: DateTime(2100),
+        helpText: 'Choose a date in the week',
+      );
+      if (selectedDate == null || !mounted) return;
+      final start = selectedDate.subtract(
+        Duration(days: selectedDate.weekday - DateTime.monday),
+      );
+      range = DateTimeRange(
+        start: start,
+        end: start.add(const Duration(days: 6)),
+      );
+    }
+
+    setState(() {
+      _exporting = true;
+      _error = null;
+    });
     try {
+      final charges = monthRangeStart != null
+          ? await _repository.getChargesForMonthRange(
+              _monthKeyFor(monthRangeStart),
+              _monthKeyFor(monthRangeEnd!),
+              search: _searchController.text,
+              studentIds: widget.allowedStudentIds,
+            )
+          : month == null
+          ? await _repository.getChargesCreatedBetween(
+              range!.start,
+              range.end,
+              search: _searchController.text,
+              studentIds: widget.allowedStudentIds,
+            )
+          : await _repository.getMonthlyCharges(
+              '${month.year}-${month.month.toString().padLeft(2, '0')}',
+              search: _searchController.text,
+              studentIds: widget.allowedStudentIds,
+            );
+      final exportCharges = charges
+          .where((charge) {
+            switch (selection.status) {
+              case _FeeExportStatus.all:
+                return true;
+              case _FeeExportStatus.paid:
+                return charge.totalOutstanding == 0;
+              case _FeeExportStatus.unpaid:
+                return charge.status == 'Unpaid';
+              case _FeeExportStatus.partialPaid:
+                return charge.status == 'Partial';
+              case _FeeExportStatus.outstandingDues:
+                return charge.totalOutstanding > 0;
+            }
+          })
+          .toList(growable: false);
+      final reportTitle = month != null
+          ? 'TLC RECEIPT OF MONTH-WISE (${_monthLabel(month)})'
+          : selection.period == _FeeExportPeriod.year
+          ? 'TLC RECEIPT OF YEAR-WISE (${monthRangeStart!.year})'
+          : selection.period == _FeeExportPeriod.session
+          ? 'TLC RECEIPT OF SESSION-WISE ($sessionLabel)'
+          : selection.period == _FeeExportPeriod.date
+          ? 'TLC RECEIPT OF DATE-WISE (${_dateLabel(range!.start)})'
+          : 'TLC RECEIPT OF WEEK-WISE '
+                '(${_shortDateLabel(range!.start)} to '
+                '${_shortDateLabel(range.end)})';
+      final periodKey = month != null
+          ? '${month.year}${month.month.toString().padLeft(2, '0')}'
+          : selection.period == _FeeExportPeriod.year
+          ? 'year_${monthRangeStart!.year}'
+          : selection.period == _FeeExportPeriod.session
+          ? 'session_$sessionLabel'
+          : selection.period == _FeeExportPeriod.date
+          ? _dateKey(range!.start)
+          : '${_dateKey(range!.start)}_to_${_dateKey(range.end)}';
+      final statusKey = switch (selection.status) {
+        _FeeExportStatus.all => 'all',
+        _FeeExportStatus.paid => 'paid',
+        _FeeExportStatus.unpaid => 'unpaid',
+        _FeeExportStatus.partialPaid => 'partial_paid',
+        _FeeExportStatus.outstandingDues => 'outstanding_dues',
+      };
       final location = await FilePicker.saveFile(
-        dialogTitle: 'Export fee ledger',
-        fileName: 'TLC_Fee_Ledger_$_monthKey.xlsx',
-        type: FileType.custom,
-        allowedExtensions: const ['xlsx'],
+        dialogTitle: 'Save fees and vouchers Excel file',
+        fileName: 'TLC_Fee_Ledger_${periodKey}_$statusKey.xlsx',
         mimeType:
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        bytes: FeeExcelExporter.encode(charges),
+        bytes: FeeExcelExporter.encode(
+          exportCharges,
+          title: reportTitle,
+          emptyMessage:
+              'No fee records matched the selected period and status.',
+        ),
       );
-      if (!mounted || location == null) return;
+      if (!mounted) return;
+      if (location == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Excel file save was canceled.')),
+        );
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('${charges.length} fee records exported to $location'),
+          content: Text(
+            '${exportCharges.length} fee records saved to $location',
+          ),
         ),
       );
     } on Exception catch (error) {
       if (mounted) {
         setState(() => _error = 'Fee ledger export failed: $error');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Fee ledger export failed: $error')),
+        );
       }
     } finally {
       if (mounted) setState(() => _exporting = false);
@@ -155,6 +425,7 @@ class _FeeVouchersPageState extends State<FeeVouchersPage> {
       final payment = await _repository.recordPayment(
         charge: charge,
         amount: entry.amount,
+        applyToFeeId: entry.applyToFeeId,
         paymentMethod: entry.method,
         notes: entry.notes,
         receivedBy: widget.user,
@@ -176,6 +447,41 @@ class _FeeVouchersPageState extends State<FeeVouchersPage> {
     } on Exception catch (error) {
       if (mounted) {
         setState(() => _error = 'Payment could not be recorded: $error');
+      }
+    }
+  }
+
+  Future<void> _editChargeBreakdown(FeeCharge charge) async {
+    final entry = await showDialog<_FeeBreakdownEntry>(
+      context: context,
+      builder: (context) => _FeeBreakdownDialog(charge: charge),
+    );
+    if (entry == null || !mounted) return;
+
+    try {
+      await _repository.updateChargeBreakdown(
+        charge: charge,
+        fees: entry.fees,
+        annual: entry.annual,
+        admission: entry.admission,
+        lab: entry.lab,
+        copies: entry.copies,
+        stationery: entry.stationery,
+        extras: entry.extras,
+        lpc: entry.lpc,
+        remarks: entry.remarks,
+        actor: widget.user,
+      );
+      if (!mounted) return;
+      setState(() {
+        _error = null;
+        _loadCharges();
+      });
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Fee voucher updated.')));
+    } on Exception catch (error) {
+      if (mounted) {
+        setState(() => _error = 'Fee voucher could not be updated: $error');
       }
     }
   }
@@ -334,7 +640,7 @@ class _FeeVouchersPageState extends State<FeeVouchersPage> {
       );
       final totalBalance = charges.fold<double>(
         0,
-        (total, charge) => total + charge.balance,
+        (total, charge) => total + charge.totalOutstanding,
       );
 
       return SingleChildScrollView(
@@ -361,10 +667,7 @@ class _FeeVouchersPageState extends State<FeeVouchersPage> {
                 const Text(
                   'Generate monthly charges, record partial payments, and issue branded receipts.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Color(0xFF727B89),
-                  ),
+                  style: TextStyle(fontSize: 12, color: Color(0xFF727B89)),
                 ),
                 const SizedBox(height: 12),
                 Wrap(
@@ -376,11 +679,9 @@ class _FeeVouchersPageState extends State<FeeVouchersPage> {
                       icon: const Icon(Icons.calendar_month_outlined),
                       label: Text(_monthLabel(_month)),
                     ),
-                    if (snapshot.hasData && charges.isNotEmpty)
+                    if (snapshot.hasData)
                       OutlinedButton.icon(
-                        onPressed: _exporting
-                            ? null
-                            : () => _exportCharges(charges),
+                        onPressed: _exporting ? null : _exportCharges,
                         icon: _exporting
                             ? const SizedBox(
                                 width: 16,
@@ -441,10 +742,7 @@ class _FeeVouchersPageState extends State<FeeVouchersPage> {
                                   strokeWidth: 2,
                                 ),
                               )
-                            : const Icon(
-                                Icons.playlist_add_rounded,
-                                size: 18,
-                              ),
+                            : const Icon(Icons.playlist_add_rounded, size: 18),
                         label: const Text('Generate monthly charges'),
                       ),
                   ],
@@ -546,7 +844,9 @@ class _FeeVouchersPageState extends State<FeeVouchersPage> {
                   _ChargesTable(
                     charges: charges,
                     canCollect: widget.canAcceptPayments,
+                    canEdit: widget.canManageCharges,
                     onCollect: _collectPayment,
+                    onEdit: _editChargeBreakdown,
                     onHistory: _showHistory,
                   ),
               ],
@@ -574,14 +874,212 @@ class _FeeVouchersPageState extends State<FeeVouchersPage> {
     ];
     return '${names[month.month - 1]} ${month.year}';
   }
+
+  static String _dateLabel(DateTime date) =>
+      '${_shortDateLabel(date)} (${_weekdayName(date.weekday)})';
+
+  static String _shortDateLabel(DateTime date) =>
+      '${_ordinal(date.day)} ${_monthAbbreviation(date.month)}, '
+      '${(date.year % 100).toString().padLeft(2, '0')}';
+
+  static String _ordinal(int day) {
+    final suffix = day % 100 >= 11 && day % 100 <= 13
+        ? 'th'
+        : switch (day % 10) {
+            1 => 'st',
+            2 => 'nd',
+            3 => 'rd',
+            _ => 'th',
+          };
+    return '$day$suffix';
+  }
+
+  static String _monthAbbreviation(int month) => const [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ][month - 1];
+
+  static String _weekdayName(int weekday) => const [
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday',
+    'Sunday',
+  ][weekday - 1];
+
+  static String _dateKey(DateTime date) =>
+      '${date.year}${date.month.toString().padLeft(2, '0')}'
+      '${date.day.toString().padLeft(2, '0')}';
+
+  static String _monthKeyFor(DateTime date) =>
+      '${date.year}-${date.month.toString().padLeft(2, '0')}';
+}
+
+class _FeeBreakdownEntry {
+  final double fees;
+  final double annual;
+  final double admission;
+  final double lab;
+  final double copies;
+  final double stationery;
+  final double extras;
+  final double lpc;
+  final String remarks;
+
+  const _FeeBreakdownEntry({
+    required this.fees,
+    required this.annual,
+    required this.admission,
+    required this.lab,
+    required this.copies,
+    required this.stationery,
+    required this.extras,
+    required this.lpc,
+    required this.remarks,
+  });
+}
+
+class _FeeBreakdownDialog extends StatefulWidget {
+  final FeeCharge charge;
+
+  const _FeeBreakdownDialog({required this.charge});
+
+  @override
+  State<_FeeBreakdownDialog> createState() => _FeeBreakdownDialogState();
+}
+
+class _FeeBreakdownDialogState extends State<_FeeBreakdownDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final Map<String, TextEditingController> _amountControllers;
+  late final TextEditingController _remarksController;
+
+  @override
+  void initState() {
+    super.initState();
+    final charge = widget.charge;
+    _amountControllers = {
+      'Fees': TextEditingController(text: charge.fees.toStringAsFixed(2)),
+      'Annual': TextEditingController(text: charge.annual.toStringAsFixed(2)),
+      'Admission': TextEditingController(
+        text: charge.admission.toStringAsFixed(2),
+      ),
+      'Lab': TextEditingController(text: charge.lab.toStringAsFixed(2)),
+      'Copies': TextEditingController(text: charge.copies.toStringAsFixed(2)),
+      'Stationery': TextEditingController(
+        text: charge.stationery.toStringAsFixed(2),
+      ),
+      'Extras': TextEditingController(text: charge.extras.toStringAsFixed(2)),
+      'LPC': TextEditingController(text: charge.lpc.toStringAsFixed(2)),
+    };
+    _remarksController = TextEditingController(text: charge.remarks);
+  }
+
+  @override
+  void dispose() {
+    for (final controller in _amountControllers.values) {
+      controller.dispose();
+    }
+    _remarksController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Edit fee heads'),
+    content: SizedBox(
+      width: 420,
+      child: SingleChildScrollView(
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'Enter Annual or Admission only when due. Apply LPC under school policy.',
+              ),
+              const SizedBox(height: 12),
+              for (final entry in _amountControllers.entries)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: TextFormField(
+                    controller: entry.value,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: InputDecoration(
+                      labelText: entry.key,
+                      prefixText: 'PKR ',
+                    ),
+                    validator: (value) {
+                      final amount = double.tryParse(value?.trim() ?? '');
+                      if (amount == null || !amount.isFinite || amount < 0) {
+                        return 'Enter a non-negative amount.';
+                      }
+                      return null;
+                    },
+                  ),
+                ),
+              TextFormField(
+                controller: _remarksController,
+                maxLines: 2,
+                decoration: const InputDecoration(labelText: 'Remarks'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        onPressed: () {
+          if (!_formKey.currentState!.validate()) return;
+          final amounts = _amountControllers.map(
+            (key, controller) =>
+                MapEntry(key, double.parse(controller.text.trim())),
+          );
+          Navigator.of(context).pop(
+            _FeeBreakdownEntry(
+              fees: amounts['Fees']!,
+              annual: amounts['Annual']!,
+              admission: amounts['Admission']!,
+              lab: amounts['Lab']!,
+              copies: amounts['Copies']!,
+              stationery: amounts['Stationery']!,
+              extras: amounts['Extras']!,
+              lpc: amounts['LPC']!,
+              remarks: _remarksController.text,
+            ),
+          );
+        },
+        child: const Text('Save voucher'),
+      ),
+    ],
+  );
 }
 
 class _PaymentEntry {
   final double amount;
+  final String? applyToFeeId;
   final String method;
   final String notes;
 
-  const _PaymentEntry(this.amount, this.method, this.notes);
+  const _PaymentEntry(this.amount, this.applyToFeeId, this.method, this.notes);
 }
 
 class _FeePaymentDialog extends StatefulWidget {
@@ -598,12 +1096,39 @@ class _FeePaymentDialogState extends State<_FeePaymentDialog> {
   late final TextEditingController _amountController;
   final _notesController = TextEditingController();
   String _method = 'Cash';
+  bool _isPartial = false;
+  String? _applyToFeeId;
+
+  List<FeeCharge> get _payableCharges => [
+    ...widget.charge.arrears,
+    widget.charge,
+  ].where((charge) => charge.balance > 0).toList(growable: false);
+
+  String _chargeBreakdown(FeeCharge charge) => [
+    if (charge.fees > 0) 'Fees ${charge.fees.toStringAsFixed(2)}',
+    if (charge.annual > 0) 'Annual ${charge.annual.toStringAsFixed(2)}',
+    if (charge.admission > 0)
+      'Admission ${charge.admission.toStringAsFixed(2)}',
+    if (charge.lab > 0) 'Lab ${charge.lab.toStringAsFixed(2)}',
+    if (charge.copies > 0) 'Copies ${charge.copies.toStringAsFixed(2)}',
+    if (charge.stationery > 0)
+      'Stationery ${charge.stationery.toStringAsFixed(2)}',
+    if (charge.extras > 0) 'Extras ${charge.extras.toStringAsFixed(2)}',
+    if (charge.lpc > 0) 'LPC ${charge.lpc.toStringAsFixed(2)}',
+  ].join(' · ');
+
+  FeeCharge? get _selectedCharge => _applyToFeeId == null
+      ? null
+      : _payableCharges.firstWhere((charge) => charge.id == _applyToFeeId);
+
+  double get _paymentLimit =>
+      _selectedCharge?.balance ?? widget.charge.totalOutstanding;
 
   @override
   void initState() {
     super.initState();
     _amountController = TextEditingController(
-      text: widget.charge.balance.toStringAsFixed(2),
+      text: widget.charge.totalOutstanding.toStringAsFixed(2),
     );
   }
 
@@ -618,7 +1143,10 @@ class _FeePaymentDialogState extends State<_FeePaymentDialog> {
     if (!_formKey.currentState!.validate()) return;
     Navigator.of(context).pop(
       _PaymentEntry(
-        double.parse(_amountController.text.trim()),
+        _isPartial
+            ? double.parse(_amountController.text.trim())
+            : _paymentLimit,
+        _applyToFeeId,
         _method,
         _notesController.text,
       ),
@@ -648,27 +1176,89 @@ class _FeePaymentDialogState extends State<_FeePaymentDialog> {
               ),
             ),
             const SizedBox(height: 14),
-            TextFormField(
-              controller: _amountController,
-              decoration: InputDecoration(
-                labelText: 'Amount received (PKR)',
-                helperText:
-                    'Remaining balance: PKR ${widget.charge.balance.toStringAsFixed(2)}',
-              ),
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-              ),
-              validator: (value) {
-                final amount = double.tryParse(value?.trim() ?? '');
-                if (amount == null || amount <= 0) {
-                  return 'Enter an amount greater than zero.';
-                }
-                if (amount > widget.charge.balance) {
-                  return 'Amount cannot exceed the remaining balance.';
-                }
-                return null;
-              },
+            DropdownButtonFormField<String?>(
+              initialValue: _applyToFeeId,
+              decoration: const InputDecoration(labelText: 'Apply payment to'),
+              items: [
+                DropdownMenuItem<String?>(
+                  value: null,
+                  child: Text(
+                    'Oldest outstanding month first · PKR '
+                    '${widget.charge.totalOutstanding.toStringAsFixed(2)}',
+                  ),
+                ),
+                for (final fee in _payableCharges)
+                  DropdownMenuItem<String?>(
+                    value: fee.id,
+                    child: Text(
+                      '${fee.monthKey} · PKR ${fee.balance.toStringAsFixed(2)}'
+                      '${_chargeBreakdown(fee).isEmpty ? '' : ' · ${_chargeBreakdown(fee)}'}',
+                    ),
+                  ),
+              ],
+              onChanged: (value) => setState(() {
+                _applyToFeeId = value;
+                _amountController.text = _paymentLimit.toStringAsFixed(2);
+              }),
             ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              children: [
+                ChoiceChip(
+                  label: const Text('Full'),
+                  selected: !_isPartial,
+                  onSelected: (selected) {
+                    if (selected) setState(() => _isPartial = false);
+                  },
+                ),
+                ChoiceChip(
+                  label: const Text('Partial'),
+                  selected: _isPartial,
+                  onSelected: (selected) {
+                    if (selected) {
+                      setState(() {
+                        _isPartial = true;
+                        _amountController.text = _paymentLimit.toStringAsFixed(
+                          2,
+                        );
+                      });
+                    }
+                  },
+                ),
+              ],
+            ),
+            if (_isPartial)
+              TextFormField(
+                controller: _amountController,
+                decoration: InputDecoration(
+                  labelText: 'Partial amount received (PKR)',
+                  helperText:
+                      'Maximum for this selection: PKR '
+                      '${_paymentLimit.toStringAsFixed(2)}',
+                ),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                validator: (value) {
+                  final amount = double.tryParse(value?.trim() ?? '');
+                  if (amount == null || amount <= 0) {
+                    return 'Enter an amount greater than zero.';
+                  }
+                  if (amount > _paymentLimit) {
+                    return 'Amount cannot exceed the selected balance.';
+                  }
+                  return null;
+                },
+              )
+            else
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Full payment: PKR ${_paymentLimit.toStringAsFixed(2)}',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+              ),
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
               initialValue: _method,
@@ -750,7 +1340,19 @@ class _ReceiptDialog extends StatelessWidget {
             'Received',
             'PKR ${payment.amountPaidThisReceipt.toStringAsFixed(2)}',
           ),
-          _receiptLine('Balance', 'PKR ${payment.balance.toStringAsFixed(2)}'),
+          _receiptLine(
+            'Outstanding before',
+            'PKR ${payment.amountDue.toStringAsFixed(2)}',
+          ),
+          for (final allocation in payment.allocations)
+            _receiptLine(
+              'Applied to ${allocation.monthKey}',
+              'PKR ${allocation.amount.toStringAsFixed(2)}',
+            ),
+          _receiptLine(
+            'Outstanding after',
+            'PKR ${payment.balance.toStringAsFixed(2)}',
+          ),
         ],
       ),
     ),
@@ -820,12 +1422,13 @@ class _PaymentHistoryDialog extends StatelessWidget {
                   title: Text(
                     payment.isReversal
                         ? 'Reversal: PKR ${payment.amountPaidThisReceipt.abs().toStringAsFixed(2)}'
-                        : 'PKR ${payment.amountPaidThisReceipt.toStringAsFixed(2)}',
+                        : 'PKR ${payment.amountPaidThisReceipt.toStringAsFixed(2)} applied',
                   ),
                   subtitle: Text(
                     payment.isReversal
                         ? '${payment.receiptNumber} • By ${payment.reversedByName} • ${payment.reversalReason}'
                         : '${payment.receiptNumber} • ${payment.paymentMethod}'
+                              '${payment.receiptAmount > payment.amountPaidThisReceipt ? ' • Receipt total PKR ${payment.receiptAmount.toStringAsFixed(2)}' : ''}'
                               '${payment.receivedByName.isEmpty ? '' : ' • Received by ${payment.receivedByName} (${payment.receivedByRole})'}'
                               '${payment.isReversed ? ' • Reversed' : ''}',
                   ),
@@ -924,13 +1527,17 @@ class _ReverseFeePaymentDialogState extends State<_ReverseFeePaymentDialog> {
 class _ChargesTable extends StatelessWidget {
   final List<FeeCharge> charges;
   final bool canCollect;
+  final bool canEdit;
   final ValueChanged<FeeCharge> onCollect;
+  final ValueChanged<FeeCharge> onEdit;
   final ValueChanged<FeeCharge> onHistory;
 
   const _ChargesTable({
     required this.charges,
     required this.canCollect,
+    required this.canEdit,
     required this.onCollect,
+    required this.onEdit,
     required this.onHistory,
   });
 
@@ -944,10 +1551,7 @@ class _ChargesTable extends StatelessWidget {
     child: SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: DataTable(
-        border: TableBorder.all(
-          color: const Color(0xFFD7DCE3),
-          width: 0.7,
-        ),
+        border: TableBorder.all(color: const Color(0xFFD7DCE3), width: 0.7),
         headingTextStyle: const TextStyle(
           color: Color(0xFF687080),
           fontWeight: FontWeight.w700,
@@ -958,6 +1562,7 @@ class _ChargesTable extends StatelessWidget {
           DataColumn(label: Center(child: Text('G.R. / CLASS'))),
           DataColumn(label: Center(child: Text('DUE'))),
           DataColumn(label: Center(child: Text('PAID'))),
+          DataColumn(label: Center(child: Text('ARREARS'))),
           DataColumn(label: Center(child: Text('BALANCE'))),
           DataColumn(label: Center(child: Text('STATUS'))),
           DataColumn(label: Center(child: Text('ACTIONS'))),
@@ -981,11 +1586,12 @@ class _ChargesTable extends StatelessWidget {
                 ),
                 DataCell(Text(_money(charge.amountDue))),
                 DataCell(Text(_money(charge.amountPaid))),
+                DataCell(Text(_money(charge.arrearsBalance))),
                 DataCell(
                   Text(
-                    _money(charge.balance),
+                    _money(charge.totalOutstanding),
                     style: TextStyle(
-                      color: charge.balance > 0
+                      color: charge.totalOutstanding > 0
                           ? const Color(0xFFAA6A21)
                           : const Color(0xFF38805A),
                       fontWeight: FontWeight.w700,
@@ -996,7 +1602,13 @@ class _ChargesTable extends StatelessWidget {
                 DataCell(
                   Row(
                     children: [
-                      if (canCollect && charge.balance > 0)
+                      if (canEdit)
+                        IconButton(
+                          tooltip: 'Edit fee heads',
+                          onPressed: () => onEdit(charge),
+                          icon: const Icon(Icons.edit_outlined, size: 19),
+                        ),
+                      if (canCollect && charge.totalOutstanding > 0)
                         TextButton(
                           onPressed: () => onCollect(charge),
                           child: const Text('Collect'),

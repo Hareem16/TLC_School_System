@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -9,7 +9,7 @@ import 'package:sqflite/sqflite.dart';
 import '../data/app_database.dart';
 
 class DatabaseBackupService {
-  static const int requiredDatabaseVersion = 14;
+  static const int requiredDatabaseVersion = AppDatabase.schemaVersion;
 
   static const List<String> requiredTables = [
     'school_profiles',
@@ -20,13 +20,18 @@ class DatabaseBackupService {
     'user_accounts',
     'fee_charges',
     'fee_payments',
+    'fee_payment_allocations',
     'inventory_items',
     'inventory_movements',
     'staff_salary_records',
+    'school_account_settings',
     'fee_payment_reversals',
     'exams',
     'exam_subjects',
     'exam_results',
+    'exam_subject_teachers',
+    'exam_class_teachers',
+    'exam_publications',
     'timetable_entries',
     'complaints',
     'class_subjects',
@@ -36,6 +41,10 @@ class DatabaseBackupService {
     'auth_preferences',
     'admin_audit_logs',
   ];
+
+  final Future<void> Function()? afterOriginalMovedForTesting;
+
+  DatabaseBackupService({this.afterOriginalMovedForTesting});
 
   bool _supportsVacuumInto(String version) {
     final parts = version.split('.').map(int.tryParse).toList();
@@ -230,7 +239,7 @@ class DatabaseBackupService {
     if (databaseVersion != requiredDatabaseVersion) {
       throw StateError(
         'Database version mismatch. '
-        'Expected 14 but found $databaseVersion. '
+        'Expected $requiredDatabaseVersion but found $databaseVersion. '
         'Backup cancelled.',
       );
     }
@@ -283,6 +292,157 @@ class DatabaseBackupService {
       if (await snapshot.exists()) {
         await snapshot.delete();
       }
+    }
+  }
+
+  Future<void> _validateRestoreCandidate(
+    Database currentDatabase,
+    Database candidate,
+  ) async {
+    await _validateDatabaseVersion(candidate, 'Selected backup');
+    await _validateRequiredTables(candidate, 'Selected backup');
+    await _validateIntegrity(candidate, 'Selected backup');
+
+    final currentSchema = await _getSchemaSignature(currentDatabase);
+    final candidateSchema = await _getSchemaSignature(candidate);
+    if (currentSchema != candidateSchema) {
+      throw StateError(
+        'The selected backup does not match this app database schema. '
+        'Restore was cancelled; update the app or select a compatible backup.',
+      );
+    }
+  }
+
+  Future<String> restoreBackup(String backupPath) async {
+    final sourceFile = File(backupPath);
+    if (!await sourceFile.exists() || await sourceFile.length() == 0) {
+      throw StateError('The selected backup file is missing or empty.');
+    }
+
+    final databaseDirectory = await getDatabasesPath();
+    final databasePath = p.join(databaseDirectory, 'tlc_school_system.db');
+    final absoluteBackupPath = p.normalize(p.absolute(sourceFile.path));
+    final absoluteDatabasePath = p.normalize(p.absolute(databasePath));
+    if (absoluteBackupPath.toLowerCase() ==
+        absoluteDatabasePath.toLowerCase()) {
+      throw StateError(
+        'Select a backup file, not the currently open database.',
+      );
+    }
+
+    final currentDatabase = await AppDatabase.instance.database;
+    final candidate = await openDatabase(sourceFile.path, readOnly: true);
+    try {
+      await _validateRestoreCandidate(currentDatabase, candidate);
+    } finally {
+      await candidate.close();
+    }
+
+    final versionRows = await currentDatabase.rawQuery(
+      'SELECT sqlite_version() AS version',
+    );
+    final sqliteVersion = versionRows.first['version']?.toString() ?? '';
+    if (!_supportsVacuumInto(sqliteVersion)) {
+      throw UnsupportedError(
+        'SQLite $sqliteVersion cannot create the required safety backup. '
+        'Restore was cancelled.',
+      );
+    }
+
+    final timestamp = DateTime.now()
+        .toIso8601String()
+        .replaceAll(':', '-')
+        .replaceAll('.', '-');
+    final safetyPath = p.join(
+      databaseDirectory,
+      'TLC_PreRestore_Safety_$timestamp.db',
+    );
+    final stagingPath = p.join(
+      databaseDirectory,
+      'tlc_school_system.restore.tmp',
+    );
+    final rollbackPath = p.join(
+      databaseDirectory,
+      'tlc_school_system.rollback.db',
+    );
+
+    final safetyFile = File(safetyPath);
+    final stagingFile = File(stagingPath);
+    final rollbackFile = File(rollbackPath);
+    final databaseFile = File(databasePath);
+    var originalMoved = false;
+    var replacementInstalled = false;
+
+    try {
+      if (await stagingFile.exists()) await stagingFile.delete();
+      if (await rollbackFile.exists()) {
+        throw StateError(
+          'A previous restore recovery file exists at $rollbackPath. '
+          'Do not continue until it has been checked.',
+        );
+      }
+
+      await currentDatabase.execute('PRAGMA wal_checkpoint(FULL)');
+      await currentDatabase.execute('VACUUM INTO ?', [safetyPath]);
+      if (!await safetyFile.exists() || await safetyFile.length() == 0) {
+        throw StateError('Could not create the pre-restore safety backup.');
+      }
+
+      await AppDatabase.instance.close();
+
+      await sourceFile.copy(stagingPath);
+      final stagedDatabase = await openDatabase(stagingPath, readOnly: true);
+      try {
+        final safetyDatabase = await openDatabase(safetyPath, readOnly: true);
+        try {
+          await _validateRestoreCandidate(safetyDatabase, stagedDatabase);
+        } finally {
+          await safetyDatabase.close();
+        }
+      } finally {
+        await stagedDatabase.close();
+      }
+
+      for (final suffix in ['-wal', '-shm']) {
+        final sidecar = File('$databasePath$suffix');
+        if (await sidecar.exists()) await sidecar.delete();
+      }
+
+      await databaseFile.rename(rollbackPath);
+      originalMoved = true;
+
+      // Test-only injection point: simulate failure after the
+      // original database has been safely moved to the rollback path.
+      await afterOriginalMovedForTesting?.call();
+
+      await stagingFile.rename(databasePath);
+      replacementInstalled = true;
+
+      final restoredDatabase = await AppDatabase.instance.database;
+      await _validateDatabaseVersion(restoredDatabase, 'Restored database');
+      await _validateRequiredTables(restoredDatabase, 'Restored database');
+      await _validateIntegrity(restoredDatabase, 'Restored database');
+
+      // Keep the verified safety snapshot. Failure to remove the old database
+      // file must not turn a successful restore into a rollback.
+      try {
+        await rollbackFile.delete();
+      } on FileSystemException {
+        // The restore is valid; retain the rollback file for manual cleanup.
+      }
+      return safetyPath;
+    } catch (error) {
+      if (replacementInstalled) {
+        await AppDatabase.instance.close();
+      }
+      if (originalMoved && await rollbackFile.exists()) {
+        if (await databaseFile.exists()) await databaseFile.delete();
+        await rollbackFile.rename(databasePath);
+        await AppDatabase.instance.database;
+      }
+      rethrow;
+    } finally {
+      if (await stagingFile.exists()) await stagingFile.delete();
     }
   }
 }

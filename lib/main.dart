@@ -650,7 +650,7 @@ class _TLCHomeState extends State<TLCHome> {
       );
     }
     if (selected == 'Payroll' && _canOpen('Payroll')) {
-      return PayrollPage(profile: p);
+      return PayrollPage(profile: p, user: widget.user);
     }
     if (selected == 'Library' && _canOpen('Library')) {
       return LibraryPage(

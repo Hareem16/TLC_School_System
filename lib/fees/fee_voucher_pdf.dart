@@ -27,16 +27,16 @@ class FeeVoucherPdf {
       'charges': charges
           .map(
             (charge) => <String, Object?>{
-              'fee_id': charge.id,
-              'student_id': charge.studentId,
-              'admission_number': charge.admissionNumber,
-              'student_name': charge.studentName,
-              'guardian_name': charge.guardianName,
-              'class_name': charge.className,
-              'month_key': charge.monthKey,
-              'family_no': charge.familyNo,
-              'amount_due': charge.amountDue,
+              ...charge.toDatabaseMap(),
               'amount_paid': charge.amountPaid,
+              'arrears': charge.arrears
+                  .map(
+                    (arrears) => <String, Object?>{
+                      ...arrears.toDatabaseMap(),
+                      'amount_paid': arrears.amountPaid,
+                    },
+                  )
+                  .toList(growable: false),
             },
           )
           .toList(growable: false),
@@ -50,10 +50,18 @@ class FeeVoucherPdf {
       Map<String, Object?>.from(request['profile']! as Map),
     );
     final logo = pw.MemoryImage(request['logoBytes']! as Uint8List);
-    final charges = (request['charges']! as List).map(
-      (row) => FeeCharge.fromDatabaseMap(Map<String, Object?>.from(row as Map)),
-    );
-    final document = pw.Document();
+    final charges = (request['charges']! as List).map((row) {
+      final chargeMap = Map<String, Object?>.from(row as Map);
+      final arrears = (chargeMap.remove('arrears')! as List)
+          .map(
+            (item) => FeeCharge.fromDatabaseMap(
+              Map<String, Object?>.from(item as Map),
+            ),
+          )
+          .toList(growable: false);
+      return FeeCharge.fromDatabaseMap(chargeMap).withArrears(arrears);
+    });
+    final document = pw.Document(version: PdfVersion.pdf_1_4);
     for (final charge in charges) {
       document.addPage(
         pw.Page(
@@ -193,7 +201,12 @@ class FeeVoucherPdf {
             'Adm. No.',
             charge.admissionNumber,
           ),
-          _detailRow('Class', charge.className, 'Month', month),
+          _detailRow(
+            'Class',
+            charge.className,
+            'Month/s',
+            charge.detailsMonths,
+          ),
           _detailRow(
             'Family No.',
             charge.familyNo.trim().isEmpty ? 'Not assigned' : charge.familyNo,
@@ -223,24 +236,32 @@ class FeeVoucherPdf {
                 isHeader: true,
                 color: accent,
               ),
-              _feeRow('Tuition Fee', _money(charge.amountDue), months: month),
-              _feeRow('Admission Fee', '0'),
-              _feeRow('Annual Charges', '0'),
-              _feeRow('Lab Charges', '0'),
-              _feeRow('Stationary Charges', '0'),
-              _feeRow('Arrears', '0'),
+              _feeRow('Fees', _money(charge.fees), months: month),
+              _feeRow('Annual', _money(charge.annual)),
+              _feeRow('Admission', _money(charge.admission)),
+              _feeRow('Lab', _money(charge.lab)),
+              _feeRow('Copies', _money(charge.copies)),
+              _feeRow('Stationery', _money(charge.stationery)),
+              _feeRow('Extras', _money(charge.extras)),
+              _feeRow('LPC', _money(charge.lpc)),
+              for (final arrears in charge.arrears)
+                _feeRow(
+                  'Pending ${_shortMonth(DateTime.parse('${arrears.monthKey}-01'))}',
+                  _money(arrears.balance),
+                  months: _shortMonth(DateTime.parse('${arrears.monthKey}-01')),
+                ),
             ],
           ),
           pw.SizedBox(height: 3),
           _amountRow(
             'Amount payable within due date: ${_dateLabel(dueDate)}',
-            _money(charge.amountDue),
+            _money(charge.totalPayable),
             bold: true,
             accent: accent,
           ),
           _amountRow(
-            'Amount payable after ${_dateLabel(dueDate)}',
-            '${_money(charge.amountDue)} + Rs.450 fine/month',
+            'Amount after due date (including assessed LPC)',
+            _money(charge.totalPayable),
           ),
           _amountRow('Challan validity date', _dateLabel(validityDate)),
           pw.SizedBox(height: 3),
@@ -281,7 +302,7 @@ class FeeVoucherPdf {
   }) {
     final style = pw.TextStyle(
       fontSize: isHeader ? 6.5 : 7,
-      fontWeight: isHeader || label == 'Tuition Fee'
+      fontWeight: isHeader || label == 'Fees'
           ? pw.FontWeight.bold
           : pw.FontWeight.normal,
       color: isHeader ? PdfColors.white : PdfColors.black,
