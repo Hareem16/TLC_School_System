@@ -69,12 +69,10 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
         dialogTitle: 'Select TLC School System database backup',
         type: FileType.custom,
         allowedExtensions: ['db', 'sqlite', 'sqlite3'],
-        allowMultiple: false,
-        withData: false,
       );
-      if (!mounted || selection == null || selection.files.isEmpty) return;
+      if (!mounted || selection.isEmpty) return;
 
-      final backupPath = selection.files.single.path;
+      final backupPath = selection.first.path;
       if (backupPath == null || backupPath.isEmpty) {
         throw StateError('The selected file path could not be accessed.');
       }
