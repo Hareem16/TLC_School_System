@@ -65,7 +65,7 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
     if (_isBackingUp) return;
 
     try {
-      final selection = await FilePicker.platform.pickFiles(
+      final selection = await FilePicker.pickFiles(
         dialogTitle: 'Select TLC School System database backup',
         type: FileType.custom,
         allowedExtensions: ['db', 'sqlite', 'sqlite3'],
@@ -310,7 +310,7 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
                         '• Creating a backup does not delete or replace records.\n'
                         '• Restore accepts only a compatible, verified database backup.\n'
                         '• A pre-restore safety copy is created before replacement.\n'
-                        '• If verification fails, the previous database is restored.'
+                        '• If verification fails, the previous database is restored.',
                         style: TextStyle(
                           height: 1.8,
                           color: Colors.blueGrey,
