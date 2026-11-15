@@ -410,7 +410,13 @@ class DatabaseBackupService {
       await _validateRequiredTables(restoredDatabase, 'Restored database');
       await _validateIntegrity(restoredDatabase, 'Restored database');
 
-      await rollbackFile.delete();
+      // Keep the verified safety snapshot. Failure to remove the old database
+      // file must not turn a successful restore into a rollback.
+      try {
+        await rollbackFile.delete();
+      } on FileSystemException {
+        // The restore is valid; retain the rollback file for manual cleanup.
+      }
       return safetyPath;
     } catch (error) {
       if (replacementInstalled) {
